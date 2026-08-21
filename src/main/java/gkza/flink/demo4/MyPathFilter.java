@@ -1,5 +1,6 @@
 package gkza.flink.demo4;
 
+import gkza.flink.utils.DateUtil;
 import org.apache.flink.core.fs.Path;
 
 import java.io.Serializable;
@@ -16,6 +17,8 @@ public class MyPathFilter implements Predicate<Path>, Serializable {
     public boolean test(Path path) {
         String fileName = path.toString();
 
-        return !fileName.contains("/2026-08-21");
+        String toDayDate = DateUtil.getToDayDate();
+
+        return !fileName.contains(toDayDate);
     }
 }
