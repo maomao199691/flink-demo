@@ -3,6 +3,7 @@ package gkza.flink.utils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
@@ -21,6 +22,9 @@ import java.util.Properties;
 public class FlinkEnvUtils {
 
     private static final Logger log = LoggerFactory.getLogger(FlinkEnvUtils.class);
+
+    /** Flink 配置中注入 Hadoop 参数使用的前缀，HadoopUtils 会自动剥掉该前缀写入 Hadoop Configuration */
+    private static final String FLINK_HADOOP_PREFIX = "flink.hadoop.";
 
     /**
      * @param prop
@@ -82,6 +86,22 @@ public class FlinkEnvUtils {
         log.info("开始创建Flink环境，batchMode={}", batchMode);
 
         int parallelism = Integer.parseInt(prop.getProperty(GkzaConstant.FLINK_PARALLELISM,"4"));
+
+        // 设置hdfs环境
+        // 2. 构建 Flink 配置，将 Hadoop HA 相关参数以 flink.hadoop. 前缀注入；
+        //    HadoopFsFactory 创建 HDFS 文件系统时，HadoopUtils.getHadoopConfiguration
+        //    会剥掉前缀，把这些参数写入 Hadoop Configuration，从而支持 hdfs://gkzacluster/ HA 路径解析
+        Configuration confHdfs = new Configuration();
+        addHadoopConfig(confHdfs, prop, GkzaConstant.FS_DEFAULTFS);
+        addHadoopConfig(confHdfs, prop, GkzaConstant.HADOOP_DFS_NAMESERVICES);
+        addHadoopConfig(confHdfs, prop, GkzaConstant.HADOOP_DFS_HA_NAMENODES_GKZACLUSTER);
+        addHadoopConfig(confHdfs, prop, GkzaConstant.HADOOP_DFS_NAMENODE_RPC_ADDRESS_GKZACLUSTER_NN1);
+        addHadoopConfig(confHdfs, prop, GkzaConstant.HADOOP_DFS_NAMENODE_RPC_ADDRESS_GKZACLUSTER_NN2);
+        addHadoopConfig(confHdfs, prop, GkzaConstant.HADOOP_DFS_CLIENT_FAILOVER_PROXY_PROVIDER_GKZACLUSTER);
+
+        // 3. 用该配置初始化全局 FileSystem 注册表，使 FileSource 解析 hdfs:// 路径时能拿到上面的 HA 配置
+        FileSystem.initialize(confHdfs);
+
 
         StreamExecutionEnvironment env;
 
@@ -183,6 +203,21 @@ public class FlinkEnvUtils {
             log.debug("设置Hadoop配置：{}={}", key, value);
         } else {
             log.debug("跳过Hadoop配置，未找到参数：{}", key);
+        }
+    }
+
+    /**
+     * 把 properties 中的 hadoop 参数以 flink.hadoop. 前缀写入 Flink Configuration，
+     * HadoopUtils 会剥掉前缀后将其作为 Hadoop 配置使用。
+     *
+     * @param conf Flink 配置
+     * @param pro  properties 配置
+     * @param key  hadoop 参数名（如 fs.defaultFS）
+     */
+    private static void addHadoopConfig(Configuration conf, Properties pro, String key) {
+        String value = pro.getProperty(key);
+        if (value != null) {
+            conf.setString(FLINK_HADOOP_PREFIX + key, value);
         }
     }
 
